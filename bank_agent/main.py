@@ -83,6 +83,7 @@ from bank_agent.ui import (
     screen_title,
     shortcut_bar,
     style,
+    user_header,
     user_prompt,
 )
 
@@ -99,6 +100,7 @@ warnings.filterwarnings(
 
 KEEP_TERMINAL_OPEN_EXIT_CODE = 3
 RETURN_TO_SESSION_PICKER = object()
+RESUMED_MESSAGE_LIMIT = 10
 
 
 class GroqConversation(LocalConversation):
@@ -391,6 +393,43 @@ def render_event(event: object) -> None:
     elif isinstance(event, ConversationErrorEvent):
         hide_activity_indicator()
         print(f"\nConversation error: {event.detail}", file=sys.stderr)
+
+
+def recent_visible_messages(
+    events: Sequence[object], limit: int = RESUMED_MESSAGE_LIMIT
+) -> tuple[list[tuple[str, str]], bool]:
+    """Return the latest persisted user/agent messages for terminal replay."""
+    visible: list[tuple[str, str]] = []
+    for event in events:
+        if not isinstance(event, MessageEvent) or event.source not in {
+            "user",
+            "agent",
+        }:
+            continue
+        message = "".join(content_to_str(event.llm_message.content)).strip()
+        if message:
+            visible.append((event.source, message))
+    return visible[-limit:], len(visible) > limit
+
+
+def show_resumed_history(
+    conversation: BaseConversation, limit: int = RESUMED_MESSAGE_LIMIT
+) -> None:
+    """Replay recent chat messages so a resumed session reads naturally."""
+    messages, earlier_messages_omitted = recent_visible_messages(
+        conversation.state.view.events, limit
+    )
+    if not messages:
+        return
+
+    divider = "SESSION RESUMED"
+    if earlier_messages_omitted:
+        divider += " | earlier messages omitted"
+    print(f"\n{style(divider, MUTED)}")
+    for source, message in messages:
+        header = user_header() if source == "user" else agent_header()
+        print(f"\n{header}\n{message}")
+    print()
 
 
 def create_conversation(
@@ -880,6 +919,7 @@ def _run_once(args: argparse.Namespace) -> int | object:
                 conversation.state.agent.dynamic_context or full_system_context
             )
             refresh_resumed_system_context(conversation, refreshed_context)
+            show_resumed_history(conversation)
         initial_task = " ".join(getattr(args, "task", [])).strip()
         if initial_task:
             run_task(

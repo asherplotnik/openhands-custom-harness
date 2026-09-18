@@ -35,12 +35,17 @@ def style(text: object, code: str, *, stream: TextIO | None = None) -> str:
 
 def user_prompt() -> str:
     """Return a distinct prompt so submitted text is identifiable in scrollback."""
-    return f"\n{style('You >', ACCENT)} "
+    return f"\n{user_header()} "
+
+
+def user_header() -> str:
+    """Return the stable label used for submitted user messages."""
+    return style("You >", ACCENT)
 
 
 def echo_user_message(message: str) -> None:
     """Show a message submitted outside the terminal's normal input line."""
-    print(f"\n{style('You >', ACCENT)}\n{message}")
+    print(f"\n{user_header()}\n{message}")
 
 
 def agent_header() -> str:

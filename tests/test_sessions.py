@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from io import StringIO
 import sys
 import tempfile
 import unittest
@@ -30,10 +31,12 @@ from bank_agent.main import (
     interactive_loop,
     is_skill_authoring_workspace,
     main,
+    recent_visible_messages,
     refresh_resumed_system_context,
     resolve_workspace,
     run_task,
     sessions_matching_launch_directory,
+    show_resumed_history,
 )
 from bank_agent.sessions import (
     SessionInUseError,
@@ -55,8 +58,8 @@ from openhands.sdk.conversation.state import (
     ConversationExecutionStatus,
     ConversationState,
 )
-from openhands.sdk.event import SystemPromptEvent
-from openhands.sdk.llm import TextContent
+from openhands.sdk.event import MessageEvent, SystemPromptEvent
+from openhands.sdk.llm import Message, TextContent
 
 
 class SessionStoreTests(unittest.TestCase):
@@ -908,6 +911,48 @@ class SessionStoreTests(unittest.TestCase):
         self.assertIsInstance(event, SystemPromptEvent)
         self.assertEqual(event.system_prompt.text, "Base agent instructions")
         self.assertEqual(event.dynamic_context.text, "Current AGENTS.md content")
+
+    def test_resuming_replays_only_the_last_ten_user_and_agent_messages(self) -> None:
+        messages = [
+            MessageEvent(
+                source="user" if index % 2 == 0 else "agent",
+                llm_message=Message(
+                    role="user" if index % 2 == 0 else "assistant",
+                    content=[TextContent(text=f"message {index}")],
+                ),
+            )
+            for index in range(12)
+        ]
+        messages.insert(
+            5,
+            MessageEvent(
+                source="environment",
+                llm_message=Message(
+                    role="user",
+                    content=[TextContent(text="internal tool feedback")],
+                ),
+            ),
+        )
+        conversation = SimpleNamespace(
+            state=SimpleNamespace(view=SimpleNamespace(events=messages))
+        )
+
+        visible, omitted = recent_visible_messages(messages)
+        output = StringIO()
+        with patch("sys.stdout", output):
+            show_resumed_history(conversation)
+
+        self.assertTrue(omitted)
+        self.assertEqual(
+            [text for _, text in visible],
+            [f"message {i}" for i in range(2, 12)],
+        )
+        rendered = output.getvalue()
+        self.assertIn("SESSION RESUMED | earlier messages omitted", rendered)
+        self.assertNotIn("message 0\n", rendered)
+        self.assertNotIn("internal tool feedback", rendered)
+        self.assertIn("You >\nmessage 10", rendered)
+        self.assertIn("Agent >\nmessage 11", rendered)
 
 
 if __name__ == "__main__":
