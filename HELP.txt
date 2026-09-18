@@ -1,0 +1,55 @@
+Bank Agent Help
+
+Chat commands
+  /h, /help     Show this help screen.
+  /p, /paste    Open clipboard text in Notepad. Save and close it to send the
+                 whole draft as one message; an empty draft cancels it.
+  /e, /exit     Close the current session and return to the session picker.
+  /q, /quit     Exit Bank Agent and leave the terminal at a command prompt.
+  Ctrl+C         While the agent is running, stop only the current run and
+                 return to the chat prompt. The session and completed work stay.
+
+Session picker
+  Up/Down       Select a session.
+  Enter         Resume the selected session.
+  n             Create a new named session.
+  /             Search active and archived sessions.
+  a             Archive or unarchive the selected session.
+  d             Permanently delete the selected session and its chat history,
+                with a separate option to delete its project workspace. Shared
+                workspaces, Scratch, and paths outside projects are protected.
+  s             Open Settings.
+  h             Show this help screen.
+  Esc           Exit Bank Agent.
+
+Workspace picker
+  Up/Down       Select an existing workspace, Scratch, or Create new workspace.
+  Enter         Choose the selected workspace.
+  n             Create a new workspace directly.
+  Esc           Return to the session picker.
+
+Workspace instructions
+  Up/Down       Select Add or paste instructions in Notepad, or Skip for now.
+  Enter         Perform the selected action.
+  p, Esc        Skip workspace instructions.
+
+Settings
+  Up/Down       Select a setting.
+  Enter         Open the selected setting.
+  Esc           Return to the session picker.
+
+Skills
+  Up/Down       Select an installed or invalid skill.
+  Enter         Show details for the selected skill.
+  Esc           Return to Settings.
+
+  Guided skill creation is temporarily unavailable. Existing skills still load.
+
+Command line
+  <session> is a unique session name, full session ID, or unique ID prefix.
+  bank-agent sessions
+  bank-agent sessions --archived
+  bank-agent sessions --all
+  bank-agent archive <session>
+  bank-agent unarchive <session>
+  bank-agent resume <session>
