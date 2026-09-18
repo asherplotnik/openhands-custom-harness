@@ -17,6 +17,10 @@ from bank_agent.approvals import (
     is_workspace_file_write,
     run_until_finished,
 )
+from bank_agent.instructions import (
+    offer_workspace_instructions,
+    workspace_instruction_context,
+)
 from bank_agent.main import (
     GENERAL_INSTRUCTIONS_PATH,
     HELP_PATH,
@@ -26,12 +30,10 @@ from bank_agent.main import (
     interactive_loop,
     is_skill_authoring_workspace,
     main,
-    offer_workspace_instructions,
     refresh_resumed_system_context,
     resolve_workspace,
     run_task,
     sessions_matching_launch_directory,
-    workspace_instruction_context,
 )
 from bank_agent.sessions import (
     SessionInUseError,
@@ -696,7 +698,10 @@ class SessionStoreTests(unittest.TestCase):
 
         with (
             patch("msvcrt.getwch", return_value="\r"),
-            patch("bank_agent.main.subprocess.run", side_effect=save_instructions) as editor,
+            patch(
+                "bank_agent.instructions.subprocess.run",
+                side_effect=save_instructions,
+            ) as editor,
         ):
             offer_workspace_instructions(workspace)
 
@@ -712,7 +717,7 @@ class SessionStoreTests(unittest.TestCase):
 
         with (
             patch("msvcrt.getwch", return_value="\r"),
-            patch("bank_agent.main.subprocess.run"),
+            patch("bank_agent.instructions.subprocess.run"),
         ):
             offer_workspace_instructions(workspace)
 
@@ -724,7 +729,7 @@ class SessionStoreTests(unittest.TestCase):
 
         with (
             patch("msvcrt.getwch", return_value="p"),
-            patch("bank_agent.main.subprocess.run") as editor,
+            patch("bank_agent.instructions.subprocess.run") as editor,
         ):
             offer_workspace_instructions(workspace)
 
