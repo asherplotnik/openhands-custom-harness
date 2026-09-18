@@ -27,6 +27,59 @@
 - Add a JFrog/Xray vulnerability workflow: CVE -> affected service -> dependency parent -> fix branch -> validation -> pull request.
 - Build organization-specific evaluation scenarios that prove the harness handles real infrastructure correctly.
 
+### Global transaction journey tracing
+
+Build a read-only tracing capability that accepts a log line or global transaction
+ID and follows the request chronologically through Splunk and GKE Logs Explorer.
+
+Known high-level journeys:
+
+- Journey A — OCP: `client -> WebSEAL/F5 -> Titan`, followed by either:
+  - `microservices -> API Connect -> ACE -> Mainframe`
+  - `Composer monolith -> Mainframe/database`
+- Journey B: `client -> F5 -> Apigee -> BFF -> microservices`, followed by
+  either `ODS` or `API Connect -> Mainframe`.
+
+Implementation shape:
+
+- Create an organization journey skill containing the stable architecture,
+  routing clues, naming conventions, known branches, common failures, and rules
+  for interpreting results.
+- Keep changing environment values in configuration rather than the skill.
+- Define `dev`, `uat`, and `prod` profiles containing their Splunk indexes, GCP
+  projects, clusters, namespaces, and service aliases. Do not store credentials
+  or secrets in the repository.
+- Keep production access permanently read-only and apply stricter time-range and
+  result limits there.
+- Add bounded, read-only `splunk-search` and `gke-log-search` tools. Add
+  `oc-inspect`, `resolve-image`, and `find-source` later.
+- Normalize results into timestamp, environment, layer, service, status, pod,
+  image, transaction ID, and source-system fields before returning them to the
+  model.
+- Use the global transaction ID as the primary link between hops. Starting from
+  any matching log, identify the journey and search only the expected next and
+  previous layers around the same time window.
+- Group temporary pods by stable workload/service labels. Treat an unknown
+  service found through transaction-ID logs as discovered runtime topology and
+  report it separately instead of inventing a permanent relationship.
+- Return a chronological journey, the likely failure point, missing expected
+  hops, retries, relevant services/pods/images, and confidence level.
+
+Information to collect when bank-environment access is available:
+
+- [ ] Exact command or API currently available for querying Splunk.
+- [ ] Whether GKE logs are queried through `gcloud logging read`, `kubectl logs`,
+      an internal CLI, or a combination.
+- [ ] Splunk indexes and GCP project/cluster/namespace mappings for `dev`, `uat`,
+      and `prod`.
+- [ ] Sanitized example log lines from every major layer and the exact global
+      transaction ID field/header names used by each one.
+- [ ] Log patterns that distinguish Journey A, Journey B, and their branches.
+- [ ] Stable Kubernetes/OpenShift labels that identify service, deployment,
+      owner, environment, image, and version.
+- [ ] Authentication method and read-only authorization boundaries for every
+      CLI, without recording credentials.
+
 ## Recommended implementation order
 
 1. Modularize and strengthen the harness.
