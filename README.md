@@ -240,8 +240,10 @@ The defaults are intentionally local and conservative:
 - `BANK_AGENT_LLM_TIMEOUT_SECONDS` defaults to 120. An unresponsive model call
   times out instead of leaving the client working indefinitely; the default
   `BANK_AGENT_LLM_NUM_RETRIES=1` makes one retry before reporting the error.
-- Direct file edits are limited to the selected session workspace.
+- Direct file edits are limited to the selected session workspace and run
+  automatically after that path check.
 - A small built-in allowlist permits safe read-only inspections automatically.
+  Read-only Git commands may target another local repository with `git -C`.
 
 Persistent work must use a named project. Use
 `--workspace agent-workspace/projects/my-project` to select one directly; without
@@ -249,8 +251,11 @@ Persistent work must use a named project. Use
 
 ## Approvals and local allowlist
 
-All actions outside the read-only allowlist require explicit approval. When the
-agent proposes one terminal command that stays within `agent-workspace`, the
+Safe read-only actions and direct file edits inside the selected workspace run
+automatically. Direct edits outside that workspace are rejected, except that an
+explicit edit of the harness's general instruction file is permitted with user
+approval. Other state-changing actions require explicit approval. When the agent
+proposes one eligible terminal command that stays within `agent-workspace`, the
 prompt offers `y/N/a`:
 
 - `y` approves it once.
@@ -265,6 +270,6 @@ it. Shell-chained commands and commands with obvious paths outside
 ## Scope
 
 This first version intentionally has no web UI, server process, Git hosting
-integration, Splunk integration, automatic approval, or diff view. Git and
-other installed command-line tools remain available to the agent through the
-terminal tool, subject to approval.
+integration, Splunk integration, broad terminal auto-approval, or diff view.
+Git and other installed command-line tools remain available to the agent through
+the terminal tool, subject to approval.

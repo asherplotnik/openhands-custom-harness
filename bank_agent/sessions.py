@@ -15,6 +15,19 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from bank_agent.skills import GUIDED_SKILL_CREATION_ENABLED, load_harness_skills
+from bank_agent.ui import (
+    ACCENT,
+    MUTED,
+    WARNING,
+    field,
+    notice as ui_notice,
+    screen_title,
+    selected_text,
+    selection_marker,
+    shortcut_bar,
+    status as styled_status,
+    style,
+)
 
 
 SESSION_INDEX_VERSION = 2
@@ -502,13 +515,15 @@ def confirm_existing_workspace(workspace: Path) -> bool:
     import msvcrt
 
     os.system("cls")
-    print("#" * 70)
-    print("#                    NOT RECOMMENDED                         #")
-    print("#" * 70)
+    print(screen_title("Shared workspace"))
+    print()
+    print(style("!  NOT RECOMMENDED", WARNING))
+    print(style("-" * 70, WARNING))
     print(f"\nprojects/{workspace.name} is an existing workspace.")
     print("A new session shares its files but not its previous agent context.")
     print("Resume the existing session unless you deliberately want a fresh view.")
-    print("\nEnter use this workspace anyway | Esc go back")
+    print()
+    print(shortcut_bar((("Enter", "use this workspace anyway"), ("Esc", "go back"))))
     while True:
         key = msvcrt.getwch()
         if key == "\r":
@@ -529,17 +544,29 @@ def choose_workspace(projects_dir: Path, scratch_workspace: Path) -> Path | None
     selected = options.index(None)
     while True:
         os.system("cls")
-        print("Choose workspace\n")
+        print(screen_title("Choose workspace"))
+        print()
         for index, option in enumerate(options):
-            marker = ">" if index == selected else " "
+            is_selected = index == selected
+            marker = selection_marker(is_selected)
             if option is None:
                 label = "Create new workspace"
             elif option == scratch_workspace:
                 label = "Start clean scratch session (clears temporary work)"
             else:
                 label = f"projects/{option.name}"
-            print(f"{marker} {label}")
-        print("\nUp/Down select | Enter choose | n create new workspace | Esc back")
+            print(f"{marker} {selected_text(label, is_selected)}")
+        print()
+        print(
+            shortcut_bar(
+                (
+                    ("Up/Down", "select"),
+                    ("Enter", "choose"),
+                    ("n", "create new workspace"),
+                    ("Esc", "back"),
+                )
+            )
+        )
 
         key = msvcrt.getwch()
         if key in {"\x00", "\xe0"}:
@@ -564,16 +591,26 @@ def choose_workspace(projects_dir: Path, scratch_workspace: Path) -> Path | None
                 if not name:
                     break
                 if has_whitespace(raw_name):
-                    print(whitespace_name_message("Workspace", raw_name))
+                    print(
+                        ui_notice(
+                            whitespace_name_message("Workspace", raw_name),
+                            tone="warning",
+                        )
+                    )
                     continue
                 if project_workspace_name_exists(projects_dir, name):
-                    print(f'\nA workspace named "{name}" already exists.')
+                    print(
+                        ui_notice(
+                            f'A workspace named "{name}" already exists.',
+                            tone="warning",
+                        )
+                    )
                     input("Press Enter to choose another name.")
                     break
                 try:
                     return create_project_workspace(projects_dir, name)
                 except ValueError as error:
-                    print(f"\n{error}")
+                    print(ui_notice(str(error), tone="error"))
                     input("Press Enter to try again.")
                     break
         elif key == "\x1b":
@@ -618,21 +655,34 @@ def show_skills_menu(skills_path: Path) -> str | None:
         selected = min(selected, max(0, len(options) - 1))
 
         os.system("cls")
-        print("Bank Agent — Skills\n")
+        print(screen_title("Skills"))
+        print()
         for index, (status, name, summary, _) in enumerate(options):
-            marker = ">" if index == selected else " "
+            is_selected = index == selected
+            marker = selection_marker(is_selected)
             if status == "create":
-                print(f"{marker} {name}")
+                print(f"{marker} {selected_text(name, is_selected)}")
             else:
-                print(f"{marker} {name[:28]:28} {status:7}  {summary}")
+                padded_name = f"{name[:28]:28}"
+                print(
+                    f"{marker} {selected_text(padded_name, is_selected)} "
+                    f"{styled_status(f'{status:7}')}  {style(summary, MUTED)}"
+                )
         if not entries:
-            print("\nNo skills installed.")
+            print(f"\n{style('No skills installed.', MUTED)}")
         if not GUIDED_SKILL_CREATION_ENABLED:
-            print("\nGuided skill creation is temporarily unavailable.")
-        footer = "\nUp/Down select | Enter details"
+            print(
+                "\n"
+                + ui_notice(
+                    "Guided skill creation is temporarily unavailable.",
+                    tone="warning",
+                )
+            )
+        footer_items = [("Up/Down", "select"), ("Enter", "details")]
         if GUIDED_SKILL_CREATION_ENABLED:
-            footer += " | n create new skill"
-        print(footer + " | Esc back")
+            footer_items.append(("n", "create new skill"))
+        footer_items.append(("Esc", "back"))
+        print(f"\n{shortcut_bar(footer_items)}")
 
         key = msvcrt.getwch()
         if key in {"\x00", "\xe0"}:
@@ -648,12 +698,13 @@ def show_skills_menu(skills_path: Path) -> str | None:
         elif key == "\r" and options:
             status, name, summary, location = options[selected]
             os.system("cls")
-            print("Bank Agent — Skill details\n")
-            print(f"Name: {name}")
-            print(f"Status: {status}")
-            print(f"Description: {summary}")
-            print(f"Location: {location}")
-            print("\nPress any key to return")
+            print(screen_title("Skill details"))
+            print()
+            print(field("Name", name))
+            print(field("Status", styled_status(status)))
+            print(field("Description", summary))
+            print(field("Location", location))
+            print(f"\n{shortcut_bar((('Any key', 'return'),))}")
             msvcrt.getwch()
         elif key == "\x1b":
             return
@@ -673,13 +724,22 @@ def show_settings_menu(
     notice: str | None = None
     while True:
         os.system("cls")
-        print("Bank Agent — Settings\n")
+        print(screen_title("Settings"))
+        print()
         if notice:
-            print(f"{notice}\n")
+            print(f"{ui_notice(notice, tone='success')}\n")
         for index, option in enumerate(options):
-            marker = ">" if index == selected else " "
-            print(f"{marker} {option}")
-        print("\nUp/Down select | Enter choose | Esc return")
+            is_selected = index == selected
+            print(
+                f"{selection_marker(is_selected)} "
+                f"{selected_text(option, is_selected)}"
+            )
+        print()
+        print(
+            shortcut_bar(
+                (("Up/Down", "select"), ("Enter", "choose"), ("Esc", "return"))
+            )
+        )
 
         key = msvcrt.getwch()
         if key in {"\x00", "\xe0"}:
@@ -711,12 +771,22 @@ def show_help(help_path: Path) -> None:
     import msvcrt
 
     os.system("cls")
-    print("Bank Agent — Help\n")
+    print(screen_title("Help"))
+    print()
     try:
-        print(help_path.read_text(encoding="utf-8").rstrip())
+        lines = help_path.read_text(encoding="utf-8").rstrip().splitlines()
+        if lines and lines[0].strip().casefold() == "bank agent help":
+            lines = lines[1:]
+            if lines and not lines[0].strip():
+                lines = lines[1:]
+        for line in lines:
+            if line and not line.startswith(" "):
+                print(style(line, ACCENT))
+            else:
+                print(line)
     except OSError as error:
-        print(f"Could not read help: {error}")
-    print("\nPress any key to return")
+        print(ui_notice(f"Could not read help: {error}", tone="error"))
+    print(f"\n{shortcut_bar((('Any key', 'return'),))}")
     msvcrt.getwch()
 
 
@@ -755,23 +825,47 @@ def choose_session(
             selected = 0
 
         os.system("cls")
-        print("Bank Agent — Sessions\n")
+        print(screen_title("Sessions"))
+        print()
         if notice:
-            print(f"{notice}\n")
+            notice_tone = "error" if "already active" in notice.casefold() else "info"
+            print(f"{ui_notice(notice, tone=notice_tone)}\n")
         if query:
-            print(f"Search: {query}\n")
+            print(f"{field('Search', query)}\n")
         if not sessions:
-            print("No active sessions found.\n")
+            print(style("No active sessions found.", MUTED))
         for index, session in enumerate(sessions):
-            marker = ">" if index == selected else " "
+            is_selected = index == selected
+            marker = selection_marker(is_selected)
             status = "archived" if session.archived else "active"
+            title = f"{session.title[:46]:46}"
             print(
-                f"{marker} {session.title[:46]:46} {status:8} "
-                f"{session.updated_at[:16]}  {session.id[:8]}"
+                f"{marker} {selected_text(title, is_selected)} "
+                f"{styled_status(f'{status:8}')} "
+                f"{style(session.updated_at[:16], MUTED)}  "
+                f"{style(session.id[:8], MUTED)}"
             )
+        print()
         print(
-            "\nUp/Down select | Enter resume | n new | / search | "
-            "a archive/unarchive | d delete | s settings | h help | Esc quit"
+            shortcut_bar(
+                (
+                    ("Up/Down", "select"),
+                    ("Enter", "resume"),
+                    ("n", "new"),
+                    ("/", "search"),
+                )
+            )
+        )
+        print(
+            shortcut_bar(
+                (
+                    ("a", "archive/unarchive"),
+                    ("d", "delete"),
+                    ("s", "settings"),
+                    ("h", "help"),
+                    ("Esc", "quit"),
+                )
+            )
         )
 
         key = msvcrt.getwch()
@@ -793,12 +887,21 @@ def choose_session(
                     cancelled = True
                     break
                 if has_whitespace(raw_name):
-                    print(whitespace_name_message("Session", raw_name))
+                    print(
+                        ui_notice(
+                            whitespace_name_message("Session", raw_name),
+                            tone="warning",
+                        )
+                    )
                     continue
                 title = title_from_task(name)
                 if store.has_title(title):
                     print(
-                        f'A session named "{title}" already exists, including archived sessions.'
+                        ui_notice(
+                            f'A session named "{title}" already exists, including '
+                            "archived sessions.",
+                            tone="warning",
+                        )
                     )
                     continue
                 break

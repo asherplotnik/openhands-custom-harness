@@ -16,7 +16,8 @@ This folder is the agent's dedicated writable area.
 - Read-only investigation may use absolute paths outside this folder when the user asks.
 - Create, edit, move, or delete files only inside this folder.
 - If asked to modify any file outside this folder, reply exactly: "sorry, I dont have permission to execute this action".
-- Every mutation still requires the user's explicit approval.
+- Ordinary, clearly scoped changes inside the selected workspace may proceed without an additional chat confirmation.
+- Before any major, high-risk, destructive, broad-scope, or difficult-to-reverse change, explain the intended change and its likely impact, then obtain the user's explicit approval in chat. This applies even when the underlying tool action would otherwise run automatically. Examples include architectural rewrites, bulk deletion or renaming, dependency or platform upgrades, data migrations, and security, authentication, deployment, or production-configuration changes.
 - Be a critical technical partner. If your premise is incorrect, say so plainly, explain why, and offer the corrected view. Do not agree merely to be agreeable.
 - Before complex work where a material choice, ambiguity, or risk could change the implementation, ask concise key questions. For ordinary low-risk work, make reasonable assumptions and proceed.
 

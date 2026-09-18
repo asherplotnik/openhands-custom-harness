@@ -6,6 +6,7 @@ import argparse
 from datetime import UTC, datetime
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -59,6 +60,19 @@ from bank_agent.skills import (
     install_skill_draft,
     load_harness_skills,
     prepare_skill_install,
+)
+from bank_agent.ui import (
+    ACCENT,
+    MUTED,
+    SUCCESS,
+    WARNING,
+    field,
+    notice,
+    screen_title,
+    selected_text,
+    selection_marker,
+    shortcut_bar,
+    style,
 )
 
 
@@ -126,9 +140,7 @@ WINDOWS_ABSOLUTE_PATH = re.compile(
 
 def _console_style(text: str, code: str) -> str:
     """Use a small amount of color when the client is running interactively."""
-    if sys.stdout.isatty() and not os.environ.get("NO_COLOR"):
-        return f"\033[{code}m{text}\033[0m"
-    return text
+    return style(text, code)
 
 
 def user_prompt() -> str:
@@ -319,14 +331,17 @@ def _settings_for_args(args: argparse.Namespace) -> Settings:
 
 def print_sessions(records: Sequence[SessionRecord], heading: str) -> None:
     """Render a compact, stable listing suitable for an ordinary terminal."""
-    print(heading)
+    print(screen_title(heading.rstrip(":")))
+    print()
     if not records:
-        print("  No sessions found.")
+        print(f"  {style('No sessions found.', MUTED)}")
         return
     for record in records:
-        status = "archived" if record.archived else "active"
+        state = "archived" if record.archived else "active"
+        state_code = MUTED if record.archived else SUCCESS
         print(
-            f"  {record.id[:8]}  {status:8}  {record.updated_at[:16]}  "
+            f"  {style(record.id[:8], MUTED)}  {style(f'{state:8}', state_code)}  "
+            f"{style(record.updated_at[:16], MUTED)}  "
             f"{record.title}"
         )
 
@@ -428,6 +443,9 @@ def workspace_instruction_context(
         "Bank Agent instruction policy:",
         "- Harness-enforced safety controls take precedence and cannot be overridden.",
         f"- The selected session workspace is: {workspace}",
+        "- Prefer direct file tools for creating or editing files; validated direct "
+        "edits inside the selected workspace run automatically. Use the terminal "
+        "only when the operation genuinely requires a shell command.",
         f"- Its session-specific instruction file is: {workspace_path}",
         "- When the user asks to add, change, or remove session-specific or workspace-specific Bank Agent instructions, edit that session-specific file. Create it if it does not exist.",
         f"- The cross-project default instruction file is: {general_path}",
@@ -463,13 +481,30 @@ def offer_workspace_instructions(workspace: Path) -> None:
     selected = 0
     while True:
         os.system("cls")
-        print("Bank Agent — Workspace instructions\n")
-        print("These optional instructions apply only to this workspace.\n")
+        print(screen_title("Workspace instructions"))
+        print()
+        print(
+            style("These optional instructions apply only to this workspace.", MUTED)
+        )
+        print()
         for index, option in enumerate(options):
-            marker = ">" if index == selected else " "
-            print(f"{marker} {option}")
+            is_selected = index == selected
+            print(
+                f"{selection_marker(is_selected)} "
+                f"{selected_text(option, is_selected)}"
+            )
         enter_action = "edit in Notepad" if selected == 0 else "skip"
-        print(f"\nUp/Down select | Enter {enter_action} | p skip | Esc skip")
+        print()
+        print(
+            shortcut_bar(
+                (
+                    ("Up/Down", "select"),
+                    ("Enter", enter_action),
+                    ("p", "skip"),
+                    ("Esc", "skip"),
+                )
+            )
+        )
 
         key = msvcrt.getwch()
         if key in {"\x00", "\xe0"}:
@@ -481,11 +516,15 @@ def offer_workspace_instructions(workspace: Path) -> None:
         elif key == "\r" and selected == 0:
             break
         elif key == "\r" or key.lower() == "p" or key == "\x1b":
-            print("No workspace instructions created.")
+            print(notice("No workspace instructions created."))
             return
 
     os.system("cls")
-    print("Opening Notepad. Save with Ctrl+S, then close Notepad to continue.")
+    print(screen_title("Workspace instructions"))
+    print()
+    print(
+        notice("Opening Notepad. Save with Ctrl+S, then close Notepad to continue.")
+    )
     try:
         instruction_path.touch(exist_ok=True)
         subprocess.run(["notepad.exe", str(instruction_path)], check=False)
@@ -495,9 +534,13 @@ def offer_workspace_instructions(workspace: Path) -> None:
 
     if instruction_path.stat().st_size == 0:
         instruction_path.unlink()
-        print("No workspace instructions created.")
+        print(notice("No workspace instructions created."))
     else:
-        print(f"Workspace instructions saved: {instruction_path}")
+        print(
+            notice(
+                f"Workspace instructions saved: {instruction_path}", tone="success"
+            )
+        )
 
 
 def compose_pasted_task() -> str | None:
@@ -610,6 +653,21 @@ def _action_payload(action_event: object) -> object:
     return getattr(action_event, "action", action_event)
 
 
+def _direct_file_write_path(action: object, writable_root: Path) -> Path | None:
+    """Resolve a direct file action target, or return None for another action."""
+    payload = _action_payload(action)
+    tool_name = getattr(action, "tool_name", None) or getattr(payload, "tool_name", None)
+    if tool_name not in DIRECT_FILE_WRITE_TOOLS:
+        return None
+
+    file_path = getattr(payload, "file_path", None)
+    if not isinstance(file_path, str) or not file_path.strip():
+        return None
+
+    candidate = Path(file_path).expanduser()
+    return (candidate if candidate.is_absolute() else writable_root / candidate).resolve()
+
+
 def is_direct_file_write_permitted(action: object, writable_root: Path) -> bool:
     """Allow direct file edits in a workspace and the one general instructions file."""
     payload = _action_payload(action)
@@ -617,14 +675,23 @@ def is_direct_file_write_permitted(action: object, writable_root: Path) -> bool:
     if tool_name not in DIRECT_FILE_WRITE_TOOLS:
         return True
 
-    file_path = getattr(payload, "file_path", None)
-    if not isinstance(file_path, str) or not file_path.strip():
+    resolved = _direct_file_write_path(action, writable_root)
+    if resolved is None:
         return False
-
-    candidate = Path(file_path).expanduser()
-    resolved = (candidate if candidate.is_absolute() else writable_root / candidate).resolve()
     if resolved == GENERAL_INSTRUCTIONS_PATH.resolve():
         return True
+    try:
+        resolved.relative_to(writable_root.resolve())
+    except ValueError:
+        return False
+    return True
+
+
+def is_workspace_file_write(action: object, writable_root: Path) -> bool:
+    """Identify a direct edit whose resolved target stays in this workspace."""
+    resolved = _direct_file_write_path(action, writable_root)
+    if resolved is None:
+        return False
     try:
         resolved.relative_to(writable_root.resolve())
     except ValueError:
@@ -648,15 +715,24 @@ def is_auto_approved_action(action: object) -> bool:
     if not command or any(char in command for char in SHELL_CONTROL_CHARACTERS):
         return False
 
-    tokens = command.split()
+    try:
+        tokens = shlex.split(command, posix=False)
+    except ValueError:
+        return False
+    if not tokens:
+        return False
     executable = tokens[0].lower()
     if executable in SAFE_POWERSHELL_COMMANDS or executable == "rg":
         return True
-    return (
-        executable == "git"
-        and len(tokens) >= 2
-        and tokens[1].lower() in SAFE_GIT_SUBCOMMANDS
-    )
+    if executable != "git":
+        return False
+
+    index = 1
+    while index < len(tokens) and tokens[index].lower() == "-c":
+        if index + 1 >= len(tokens):
+            return False
+        index += 2
+    return index < len(tokens) and tokens[index].lower() in SAFE_GIT_SUBCOMMANDS
 
 
 def is_allowlist_candidate(action: object) -> bool:
@@ -699,13 +775,17 @@ def is_persistently_allowed(action: object, allowlist: CommandAllowlist) -> bool
 
 
 def _print_pending_actions(pending_actions: list[object]) -> None:
-    print(f"\nApproval required for {len(pending_actions)} action(s):")
+    print()
+    print(style(f"APPROVAL REQUIRED  ({len(pending_actions)} action(s))", WARNING))
     for index, action in enumerate(pending_actions, start=1):
         tool_name = getattr(action, "tool_name", "unknown tool")
         summary = getattr(action, "summary", None) or "No summary provided."
         raw_action = str(getattr(action, "action", action)).replace("\n", " ")
-        print(f"  {index}. [{tool_name}] {summary}")
-        print(f"     {raw_action[:500]}")
+        print(
+            f"  {style(f'{index}.', ACCENT)} "
+            f"{style(f'[{tool_name}]', MUTED)} {summary}"
+        )
+        print(f"     {style(raw_action[:500], MUTED)}")
 
 
 def confirm_in_console(
@@ -771,7 +851,8 @@ def run_until_finished(
                 )
                 continue
             if all(
-                is_auto_approved_action(action)
+                is_workspace_file_write(action, writable_root)
+                or is_auto_approved_action(action)
                 or is_persistently_allowed(action, allowlist)
                 for action in pending
             ):
@@ -967,13 +1048,21 @@ def interactive_loop(
     """Run one chat and report whether to go home, quit, or keep the terminal."""
     if skill_installer is None:
         print(
-            "Enter a coding task. Type /paste for multi-line input, /h for help, "
-            "/e for sessions, or /q to quit."
+            shortcut_bar(
+                (
+                    ("/p", "paste"),
+                    ("/h", "help"),
+                    ("/e", "sessions"),
+                    ("/q", "quit"),
+                )
+            )
         )
     else:
         print(
-            "Skill creation session. Describe the skill you want to create, then "
-            "type /install when the draft is ready."
+            notice(
+                "Skill creation session. Describe the skill you want to create, then "
+                "type /install when the draft is ready."
+            )
         )
     while True:
         try:
@@ -1224,18 +1313,20 @@ def _run_once(args: argparse.Namespace) -> int | object:
         print(str(error), file=sys.stderr)
         return 2
 
-    print(f"Workspace: {workspace}")
-    print(f"Session: {session.title} ({session.id[:8]})")
-    print(f"Provider: {settings.provider}")
-    print(f"Model: {settings.model}")
-    print(
-        "Read-only allowlisted actions run automatically; other actions require "
-        "approval (use a to remember a safe Git read command)."
-    )
+    print(screen_title("Chat"))
+    print()
+    print(field("Workspace", workspace))
+    print(field("Session", f"{session.title} ({session.id[:8]})"))
+    print(field("Provider", settings.provider))
+    print(field("Model", settings.model))
     if instruction_sources:
-        print("Instructions: " + ", ".join(str(path) for path in instruction_sources))
+        print(
+            field(
+                "Instructions", ", ".join(str(path) for path in instruction_sources)
+            )
+        )
     else:
-        print("Instructions: no Bank Agent AGENTS.md files found.")
+        print(field("Instructions", "no Bank Agent AGENTS.md files found."))
 
     skill_catalog = load_harness_skills(
         BUILTIN_SKILLS_PATH if skill_authoring else SKILLS_PATH
@@ -1243,12 +1334,21 @@ def _run_once(args: argparse.Namespace) -> int | object:
     if skill_catalog.skills:
         suffix = " (authoring)" if skill_authoring else ""
         print(
-            "Skills: "
-            + ", ".join(skill.name for skill in skill_catalog.skills)
-            + suffix
+            field(
+                "Skills",
+                ", ".join(skill.name for skill in skill_catalog.skills) + suffix,
+            )
         )
     else:
-        print("Skills: none installed.")
+        print(field("Skills", "none installed."))
+    print()
+    print(
+        notice(
+            "Read-only actions and direct workspace file edits run automatically; "
+            "terminal changes require approval. Use a to remember an eligible command."
+        )
+    )
+    print()
     for issue in skill_catalog.issues:
         print(f"Skill skipped ({issue.name}): {issue.message}", file=sys.stderr)
 

@@ -10,10 +10,31 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from bank_agent.allowlist import CommandAllowlist
+from bank_agent.main import (
+    GENERAL_INSTRUCTIONS_PATH,
+    HELP_PATH,
+    KEEP_TERMINAL_OPEN_EXIT_CODE,
+    RETURN_TO_SESSION_PICKER,
+    close_conversation_safely,
+    interactive_loop,
+    is_auto_approved_action,
+    is_direct_file_write_permitted,
+    is_skill_authoring_workspace,
+    is_workspace_file_write,
+    main,
+    offer_workspace_instructions,
+    refresh_resumed_system_context,
+    resolve_workspace,
+    run_task,
+    run_until_finished,
+    sessions_matching_launch_directory,
+    workspace_instruction_context,
+)
 from bank_agent.sessions import (
-    SessionStore,
     SessionInUseError,
     SessionLock,
+    SessionStore,
     UNTITLED_SESSION,
     choose_session,
     choose_workspace,
@@ -24,25 +45,12 @@ from bank_agent.sessions import (
     name_suggestions,
     whitespace_name_message,
 )
-from bank_agent.main import (
-    GENERAL_INSTRUCTIONS_PATH,
-    HELP_PATH,
-    KEEP_TERMINAL_OPEN_EXIT_CODE,
-    RETURN_TO_SESSION_PICKER,
-    close_conversation_safely,
-    interactive_loop,
-    is_skill_authoring_workspace,
-    is_direct_file_write_permitted,
-    main,
-    offer_workspace_instructions,
-    refresh_resumed_system_context,
-    resolve_workspace,
-    run_task,
-    sessions_matching_launch_directory,
-    workspace_instruction_context,
-)
 from bank_agent.config import load_settings
 from openhands.sdk.context.view import View
+from openhands.sdk.conversation.state import (
+    ConversationExecutionStatus,
+    ConversationState,
+)
 from openhands.sdk.event import SystemPromptEvent
 from openhands.sdk.llm import TextContent
 
@@ -734,6 +742,95 @@ class SessionStoreTests(unittest.TestCase):
 
         self.assertTrue(is_direct_file_write_permitted(general_edit, workspace))
         self.assertFalse(is_direct_file_write_permitted(other_edit, workspace))
+
+    def test_only_direct_file_writes_inside_the_workspace_are_auto_approved(self) -> None:
+        root = Path(self.temporary_directory.name)
+        workspace = root / "projects" / "test1"
+        workspace.mkdir(parents=True)
+        relative_edit = SimpleNamespace(tool_name="edit", file_path="src/App.java")
+        absolute_edit = SimpleNamespace(
+            tool_name="write_file", file_path=str(workspace / "README.md")
+        )
+        escaped_edit = SimpleNamespace(
+            tool_name="write_file", file_path="../outside.txt"
+        )
+        general_edit = SimpleNamespace(
+            tool_name="write_file", file_path=str(GENERAL_INSTRUCTIONS_PATH)
+        )
+        terminal_action = SimpleNamespace(tool_name="terminal", command="mvn test")
+
+        self.assertTrue(is_workspace_file_write(relative_edit, workspace))
+        self.assertTrue(is_workspace_file_write(absolute_edit, workspace))
+        self.assertFalse(is_workspace_file_write(escaped_edit, workspace))
+        self.assertFalse(is_workspace_file_write(general_edit, workspace))
+        self.assertFalse(is_workspace_file_write(terminal_action, workspace))
+
+    def test_read_only_git_with_dash_c_is_auto_approved_for_any_directory(self) -> None:
+        for command in (
+            "git -C quotesClient status",
+            "git -C .. diff --stat",
+            'git -C "C:\\other workspace\\repository" log -5',
+            "git -C first -C nested show HEAD",
+        ):
+            with self.subTest(command=command):
+                action = SimpleNamespace(
+                    tool_name="terminal",
+                    command=command,
+                    is_input=False,
+                )
+                self.assertTrue(is_auto_approved_action(action))
+
+    def test_mutating_or_malformed_git_with_dash_c_still_requires_approval(self) -> None:
+        for command in (
+            "git -C quotesClient reset --hard",
+            "git -C quotesClient checkout main",
+            "git -C",
+            'git -C "unterminated status',
+        ):
+            with self.subTest(command=command):
+                action = SimpleNamespace(
+                    tool_name="terminal",
+                    command=command,
+                    is_input=False,
+                )
+                self.assertFalse(is_auto_approved_action(action))
+
+    def test_workspace_file_write_runs_without_calling_the_confirmer(self) -> None:
+        workspace = Path(self.temporary_directory.name) / "workspace"
+        workspace.mkdir()
+        action = SimpleNamespace(tool_name="write_file", file_path="src/App.java")
+        state = SimpleNamespace(
+            execution_status=ConversationExecutionStatus.WAITING_FOR_CONFIRMATION,
+            events=[],
+        )
+        conversation = SimpleNamespace(state=state)
+        confirmer_calls: list[list[object]] = []
+
+        def finish(_: object) -> None:
+            state.execution_status = ConversationExecutionStatus.FINISHED
+
+        def confirmer(actions: list[object]) -> bool:
+            confirmer_calls.append(actions)
+            return True
+
+        with (
+            patch.object(
+                ConversationState,
+                "get_unmatched_actions",
+                return_value=[action],
+            ),
+            patch("bank_agent.main.run_with_activity", side_effect=finish),
+        ):
+            run_until_finished(
+                conversation,
+                workspace,
+                CommandAllowlist(
+                    Path(self.temporary_directory.name) / "allowlist.json"
+                ),
+                confirmer=confirmer,
+            )
+
+        self.assertEqual(confirmer_calls, [])
 
     def test_skill_draft_workspace_is_allowed_but_nested_drafts_are_not(self) -> None:
         root = Path(self.temporary_directory.name)
