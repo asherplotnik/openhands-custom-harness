@@ -11,6 +11,12 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from bank_agent.allowlist import CommandAllowlist
+from bank_agent.approvals import (
+    is_auto_approved_action,
+    is_direct_file_write_permitted,
+    is_workspace_file_write,
+    run_until_finished,
+)
 from bank_agent.main import (
     GENERAL_INSTRUCTIONS_PATH,
     HELP_PATH,
@@ -18,16 +24,12 @@ from bank_agent.main import (
     RETURN_TO_SESSION_PICKER,
     close_conversation_safely,
     interactive_loop,
-    is_auto_approved_action,
-    is_direct_file_write_permitted,
     is_skill_authoring_workspace,
-    is_workspace_file_write,
     main,
     offer_workspace_instructions,
     refresh_resumed_system_context,
     resolve_workspace,
     run_task,
-    run_until_finished,
     sessions_matching_launch_directory,
     workspace_instruction_context,
 )
@@ -819,7 +821,7 @@ class SessionStoreTests(unittest.TestCase):
                 "get_unmatched_actions",
                 return_value=[action],
             ),
-            patch("bank_agent.main.run_with_activity", side_effect=finish),
+            patch("bank_agent.approvals.run_with_activity", side_effect=finish),
         ):
             run_until_finished(
                 conversation,
