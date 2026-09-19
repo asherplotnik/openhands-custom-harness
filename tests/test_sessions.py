@@ -310,6 +310,44 @@ class SessionStoreTests(unittest.TestCase):
         self.assertEqual(result, "home")
         show_help.assert_called_once_with(HELP_PATH)
 
+    def test_chat_log_command_renders_history_without_sending_a_task(self) -> None:
+        session_id = "1" * 32
+        self.store.create(
+            workspace=Path(self.temporary_directory.name),
+            provider="groq",
+            model="groq/test",
+            session_id=session_id,
+            title="log-test",
+        )
+        event = MessageEvent(
+            source="user",
+            llm_message=Message(
+                role="user",
+                content=[TextContent(text="persisted message")],
+            ),
+        )
+        conversation = SimpleNamespace(
+            state=SimpleNamespace(view=SimpleNamespace(events=[event]))
+        )
+        output = StringIO()
+        with (
+            patch("builtins.input", side_effect=["/logs -m -l 1", "/e"]),
+            patch("sys.stdout", output),
+            patch("bank_agent.main.run_task") as run_task_mock,
+        ):
+            result = interactive_loop(
+                conversation,
+                Path(self.temporary_directory.name),
+                SimpleNamespace(),
+                self.store,
+                session_id,
+            )
+
+        self.assertEqual(result, "home")
+        self.assertIn("Bank Agent Session Log", output.getvalue())
+        self.assertIn("persisted message", output.getvalue())
+        run_task_mock.assert_not_called()
+
     def test_paste_commands_send_the_complete_draft_as_one_task(self) -> None:
         pasted_task = "Review this code:\n\n```python\nprint('hello')\n```\n"
         for command in ("/p", "/paste"):

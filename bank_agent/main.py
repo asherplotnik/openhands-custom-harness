@@ -52,6 +52,7 @@ from bank_agent.paths import (
     HELP_PATH,
     PROJECTS_WORKSPACE,
     SCRATCH_WORKSPACE,
+    SESSION_LOGS_PATH,
     SESSIONS_PATH,
     SKILL_DRAFTS_PATH,
     SKILLS_PATH,
@@ -65,6 +66,11 @@ from bank_agent.sessions import (
     show_help,
 )
 from bank_agent.search_tool import SearchTool
+from bank_agent.session_logs import (
+    format_session_log,
+    parse_session_log_command,
+    write_session_log,
+)
 from bank_agent.skills import (
     GUIDED_SKILL_CREATION_ENABLED,
     HarnessSkillCatalog,
@@ -594,6 +600,7 @@ def interactive_loop(
             shortcut_bar(
                 (
                     ("/p", "paste"),
+                    ("/l", "logs"),
                     ("/h", "help"),
                     ("/e", "sessions"),
                     ("/q", "quit"),
@@ -620,6 +627,36 @@ def interactive_loop(
             return "terminal"
         if task in {"/h", "/help"}:
             show_help(HELP_PATH)
+            continue
+        try:
+            log_options = parse_session_log_command(task)
+        except ValueError as error:
+            print(f"\n{error}")
+            print("Usage: /logs [-l NUMBER] [-m] [-f]")
+            continue
+        if log_options is not None:
+            session = session_store.get(session_id)
+            generated_at = datetime.now().astimezone()
+            log = format_session_log(
+                session,
+                conversation.state.view.events,
+                log_options,
+                generated_at=generated_at,
+            )
+            if log_options.write_file:
+                try:
+                    path = write_session_log(
+                        SESSION_LOGS_PATH,
+                        session,
+                        log,
+                        generated_at=generated_at,
+                    )
+                except OSError as error:
+                    print(f"\nCould not write session log: {error}")
+                else:
+                    print(f"\nSession log written to:\n{path}")
+            else:
+                print(f"\n{log}")
             continue
         if task in {"/p", "/paste"}:
             pasted_task = compose_pasted_task()

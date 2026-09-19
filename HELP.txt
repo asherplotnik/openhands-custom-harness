@@ -4,6 +4,11 @@ Chat commands
   /h, /help     Show this help screen.
   /p, /paste    Open clipboard text in Notepad. Save and close it to send the
                  whole draft as one message; an empty draft cancels it.
+  /l, /log,
+  /logs          Show a readable log of this session. Options can be combined:
+                   -l, --limit NUMBER   Show only the last NUMBER entries.
+                   -m, --messages-only  Show only user and agent messages.
+                   -f, --file           Write the log to a file instead.
   /e, /exit     Close the current session and return to the session picker.
   /q, /quit     Exit Bank Agent and leave the terminal at a command prompt.
   Ctrl+C         While the agent is running, stop only the current run and
