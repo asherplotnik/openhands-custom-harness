@@ -18,7 +18,6 @@ from openhands.sdk import (
     AgentContext,
     BaseConversation,
     Conversation,
-    LLM,
     LocalConversation,
 )
 from openhands.sdk.conversation.exceptions import ConversationRunError
@@ -43,6 +42,7 @@ from bank_agent.instructions import (
     offer_workspace_instructions,
     workspace_instruction_context,
 )
+from bank_agent.llm import BankAgentLLM
 from bank_agent.paths import (
     APP_ROOT,
     BUILTIN_SKILLS_PATH,
@@ -448,7 +448,7 @@ def create_conversation(
     """Create an approval-first agent whose state is persisted per session."""
     if settings.provider == "gemini":
         register_gemini_connector()
-    llm = LLM(
+    llm = BankAgentLLM(
         usage_id="bank-agent",
         model=settings.model,
         base_url=settings.base_url,

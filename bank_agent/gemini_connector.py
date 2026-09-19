@@ -127,7 +127,14 @@ def _request_body(messages: list[Any], tools: Iterable[Any] | None) -> dict[str,
             contents.append({"role": "model" if role == "assistant" else "user", "parts": parts})
     flush_responses()
 
-    body: dict[str, Any] = {"contents": contents}
+    body: dict[str, Any] = {
+        "contents": contents,
+        "generationConfig": {
+            "thinkingConfig": {
+                "includeThoughts": True,
+            }
+        },
+    }
     if system_parts:
         body["systemInstruction"] = {"parts": system_parts}
     declarations = []
@@ -161,22 +168,32 @@ class GeminiConnectorLLM(CustomLLM):
         return response.json()
 
     @staticmethod
-    def _choices(payload: dict[str, Any]) -> tuple[str, list[dict[str, Any]], str]:
+    def _choices(
+        payload: dict[str, Any],
+    ) -> tuple[str, str, list[dict[str, Any]], str]:
         candidate = (payload.get("candidates") or [{}])[0]
         text = ""
+        reasoning = ""
         tool_calls: list[dict[str, Any]] = []
         for part in candidate.get("content", {}).get("parts", []):
             if isinstance(part.get("text"), str):
-                text += part["text"]
+                if part.get("thought") is True:
+                    reasoning += part["text"]
+                else:
+                    text += part["text"]
             call = part.get("functionCall")
             if isinstance(call, dict) and call.get("name"):
                 tool_calls.append({"id": _call_id(part.get("thoughtSignature")), "type": "function", "function": {"name": call["name"], "arguments": json.dumps(call.get("args", {}))}})
         finish = "tool_calls" if tool_calls else "stop"
-        return text, tool_calls, finish
+        return text, reasoning, tool_calls, finish
 
     def completion(self, model: str, messages: list, api_base: str, custom_prompt_dict: dict, model_response: ModelResponse, print_verbose: Callable, encoding: Any, api_key: str, logging_obj: Any, optional_params: dict, **kwargs: Any) -> ModelResponse:
-        text, tool_calls, finish = self._choices(self._call(api_base, api_key, model, messages, optional_params, kwargs.get("timeout")))
-        message: dict[str, Any] = {"role": "assistant", "content": text or None}
+        text, reasoning, tool_calls, finish = self._choices(self._call(api_base, api_key, model, messages, optional_params, kwargs.get("timeout")))
+        message: dict[str, Any] = {
+            "role": "assistant",
+            "content": text or None,
+            "reasoning_content": reasoning or None,
+        }
         if tool_calls:
             message["tool_calls"] = tool_calls
         model_response.choices = [Choices(index=0, message=message, finish_reason=finish)]
@@ -186,7 +203,17 @@ class GeminiConnectorLLM(CustomLLM):
         return self.completion(*args, **kwargs)
 
     async def astreaming(self, model: str, messages: list, api_base: str, custom_prompt_dict: dict, model_response: ModelResponse, print_verbose: Callable, encoding: Any, api_key: str, logging_obj: Any, optional_params: dict, **kwargs: Any) -> AsyncIterator[dict[str, Any]]:
-        text, tool_calls, finish = self._choices(self._call(api_base, api_key, model, messages, optional_params, kwargs.get("timeout")))
+        text, reasoning, tool_calls, finish = self._choices(self._call(api_base, api_key, model, messages, optional_params, kwargs.get("timeout")))
+        if reasoning:
+            yield {
+                "text": "",
+                "is_finished": False,
+                "finish_reason": "",
+                "usage": None,
+                "provider_specific_fields": {
+                    "reasoning_content": reasoning,
+                },
+            }
         if text:
             yield {"text": text, "is_finished": False, "finish_reason": "", "usage": None}
         for tool_call in tool_calls:
