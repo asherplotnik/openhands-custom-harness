@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import os
+import shutil
 import sys
 import threading
+import time
 from collections.abc import Iterable
 from typing import Protocol, TextIO
 
@@ -114,18 +116,20 @@ class RunnableConversation(Protocol):
 
 
 class ActivityIndicator:
-    """Render a quiet terminal-only activity wave while the model is running."""
+    """Render one changing line describing the latest known activity."""
 
     _FRAMES = ("█    ", " █   ", "  █  ", "   █ ", "    █")
     _INTERVAL_SECONDS = 0.14
-    _CLEAR_WIDTH = 32
 
-    def __init__(self) -> None:
+    def __init__(self, message: str, started_at: float) -> None:
         self._stop = threading.Event()
         self._hidden = threading.Event()
         self._lock = threading.Lock()
         self._thread: threading.Thread | None = None
         self._shown = False
+        self._message = _one_line(message)
+        self._started_at = started_at
+        self._rendered_width = 0
 
     def start(self) -> None:
         if not sys.stdout.isatty():
@@ -141,6 +145,11 @@ class ActivityIndicator:
                 self._clear_line()
                 self._shown = False
 
+    def update(self, message: str) -> None:
+        """Replace the status text while keeping the task's elapsed timer."""
+        with self._lock:
+            self._message = _one_line(message)
+
     def stop(self) -> None:
         self._stop.set()
         if self._thread is not None:
@@ -155,36 +164,103 @@ class ActivityIndicator:
         while not self._stop.is_set():
             if not self._hidden.is_set():
                 with self._lock:
-                    line = style(f"  {self._FRAMES[frame_index]}  working", "94")
-                    sys.stdout.write(f"\r{line}")
+                    elapsed = max(0.0, time.monotonic() - self._started_at)
+                    plain = format_activity_line(
+                        self._FRAMES[frame_index],
+                        self._message,
+                        elapsed,
+                        shutil.get_terminal_size(fallback=(100, 24)).columns,
+                    )
+                    clear_width = max(self._rendered_width, len(plain))
+                    sys.stdout.write(f"\r{' ' * clear_width}\r{style(plain, '94')}")
                     sys.stdout.flush()
                     self._shown = True
+                    self._rendered_width = len(plain)
             frame_index = (frame_index + 1) % len(self._FRAMES)
             self._stop.wait(self._INTERVAL_SECONDS)
 
     def _clear_line(self) -> None:
-        sys.stdout.write(f"\r{' ' * self._CLEAR_WIDTH}\r")
+        sys.stdout.write(f"\r{' ' * self._rendered_width}\r")
         sys.stdout.flush()
+        self._rendered_width = 0
+
+
+def _one_line(value: str) -> str:
+    """Collapse event summaries into a stable single terminal line."""
+    return " ".join(value.split()) or "Analyzing request"
+
+
+def format_elapsed(seconds: float) -> str:
+    """Format elapsed task time compactly for the activity line."""
+    total_seconds = max(0, int(seconds))
+    hours, remainder = divmod(total_seconds, 3600)
+    minutes, seconds = divmod(remainder, 60)
+    if hours:
+        return f"{hours}h {minutes:02d}m {seconds:02d}s"
+    if minutes:
+        return f"{minutes}m {seconds:02d}s"
+    return f"{seconds}s"
+
+
+def format_activity_line(
+    frame: str, message: str, elapsed_seconds: float, terminal_width: int
+) -> str:
+    """Build a width-bounded activity line without ANSI escape sequences."""
+    prefix = f"  {frame}  "
+    suffix = f"  ·  {format_elapsed(elapsed_seconds)}"
+    available = max(1, terminal_width - len(prefix) - len(suffix) - 1)
+    label = _one_line(message)
+    if len(label) > available:
+        label = f"{label[: max(1, available - 1)]}…"
+    return f"{prefix}{label}{suffix}"
 
 
 _active_activity: ActivityIndicator | None = None
+_activity_message = "Analyzing request"
+_activity_started_at = time.monotonic()
+_activity_state_lock = threading.Lock()
+
+
+def reset_activity_status(message: str = "Analyzing request") -> None:
+    """Start a fresh elapsed timer and status for one user task."""
+    global _activity_message, _activity_started_at
+    with _activity_state_lock:
+        _activity_message = _one_line(message)
+        _activity_started_at = time.monotonic()
+        active = _active_activity
+    if active is not None:
+        active.update(_activity_message)
+
+
+def update_activity_status(message: str) -> None:
+    """Publish the latest truthful activity summary to this and later run cycles."""
+    global _activity_message
+    with _activity_state_lock:
+        _activity_message = _one_line(message)
+        active = _active_activity
+    if active is not None:
+        active.update(_activity_message)
 
 
 def run_with_activity(conversation: RunnableConversation) -> None:
     """Run one SDK turn with a non-persistent visual activity indicator."""
     global _active_activity
-    activity = ActivityIndicator()
-    _active_activity = activity
+    with _activity_state_lock:
+        activity = ActivityIndicator(_activity_message, _activity_started_at)
+        _active_activity = activity
     activity.start()
     try:
         conversation.run()
     finally:
         activity.stop()
-        if _active_activity is activity:
-            _active_activity = None
+        with _activity_state_lock:
+            if _active_activity is activity:
+                _active_activity = None
 
 
 def hide_activity_indicator() -> None:
     """Prevent the indicator from overwriting a visible agent message or error."""
-    if _active_activity is not None:
-        _active_activity.hide()
+    with _activity_state_lock:
+        active = _active_activity
+    if active is not None:
+        active.hide()

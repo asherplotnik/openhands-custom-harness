@@ -58,8 +58,9 @@ from openhands.sdk.conversation.state import (
     ConversationExecutionStatus,
     ConversationState,
 )
-from openhands.sdk.event import MessageEvent, SystemPromptEvent
-from openhands.sdk.llm import Message, TextContent
+from openhands.sdk.event import ActionEvent, MessageEvent, SystemPromptEvent
+from openhands.sdk.llm import Message, MessageToolCall, TextContent
+from openhands.sdk.tool.builtins import FinishAction
 
 
 class SessionStoreTests(unittest.TestCase):
@@ -991,6 +992,43 @@ class SessionStoreTests(unittest.TestCase):
         self.assertNotIn("internal tool feedback", rendered)
         self.assertIn("You >\nmessage 10", rendered)
         self.assertIn("Agent >\nmessage 11", rendered)
+
+    def test_resuming_replays_agent_finish_actions_as_messages(self) -> None:
+        finish_message = "The refactor is complete and all tests pass."
+        events = [
+            MessageEvent(
+                source="user",
+                llm_message=Message(
+                    role="user",
+                    content=[TextContent(text="Refactor the service")],
+                ),
+            ),
+            ActionEvent(
+                source="agent",
+                thought=[],
+                action=FinishAction(message=finish_message),
+                tool_name="finish",
+                tool_call_id="finish-call",
+                tool_call=MessageToolCall(
+                    id="finish-call",
+                    name="finish",
+                    arguments='{"message":"done"}',
+                    origin="completion",
+                ),
+                llm_response_id="finish-response",
+            ),
+        ]
+
+        visible, omitted = recent_visible_messages(events)
+
+        self.assertFalse(omitted)
+        self.assertEqual(
+            visible,
+            [
+                ("user", "Refactor the service"),
+                ("agent", finish_message),
+            ],
+        )
 
 
 if __name__ == "__main__":

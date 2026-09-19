@@ -25,6 +25,7 @@ from openhands.sdk.event import (
     ActionEvent,
     AgentErrorEvent,
     MessageEvent,
+    ObservationEvent,
     SystemPromptEvent,
 )
 from openhands.sdk.event.conversation_error import ConversationErrorEvent
@@ -86,9 +87,11 @@ from bank_agent.ui import (
     field,
     hide_activity_indicator,
     notice,
+    reset_activity_status,
     screen_title,
     shortcut_bar,
     style,
+    update_activity_status,
     user_header,
     user_prompt,
 )
@@ -388,11 +391,19 @@ def render_event(event: object) -> None:
         if message:
             hide_activity_indicator()
             print(f"\n{agent_header()}\n{message}")
-    elif isinstance(event, ActionEvent) and event.tool_name == "finish":
-        message = str(getattr(event.action, "message", "")).strip()
-        if message:
-            hide_activity_indicator()
-            print(f"\n{agent_header()}\n{message}")
+    elif isinstance(event, ActionEvent):
+        if event.tool_name == "finish":
+            message = str(getattr(event.action, "message", "")).strip()
+            if message:
+                hide_activity_indicator()
+                print(f"\n{agent_header()}\n{message}")
+        else:
+            update_activity_status(
+                event.summary or f"Running {event.tool_name.replace('_', ' ')}"
+            )
+    elif isinstance(event, ObservationEvent):
+        tool = event.tool_name.replace("_", " ")
+        update_activity_status(f"Analyzing {tool} result")
     elif isinstance(event, AgentErrorEvent):
         hide_activity_indicator()
         print(f"\nAgent tool error: {event.error}", file=sys.stderr)
@@ -407,14 +418,16 @@ def recent_visible_messages(
     """Return the latest persisted user/agent messages for terminal replay."""
     visible: list[tuple[str, str]] = []
     for event in events:
-        if not isinstance(event, MessageEvent) or event.source not in {
-            "user",
-            "agent",
-        }:
-            continue
-        message = "".join(content_to_str(event.llm_message.content)).strip()
+        source: str | None = None
+        message = ""
+        if isinstance(event, MessageEvent) and event.source in {"user", "agent"}:
+            source = event.source
+            message = "".join(content_to_str(event.llm_message.content)).strip()
+        elif isinstance(event, ActionEvent) and event.tool_name == "finish":
+            source = "agent"
+            message = str(getattr(event.action, "message", "")).strip()
         if message:
-            visible.append((event.source, message))
+            visible.append((source or "agent", message))
     return visible[-limit:], len(visible) > limit
 
 
@@ -537,6 +550,7 @@ def run_task(
     session_id: str,
 ) -> None:
     session_store.touch(session_id, task=task)
+    reset_activity_status()
     conversation.send_message(task)
     try:
         run_until_finished(conversation, writable_root, allowlist)
