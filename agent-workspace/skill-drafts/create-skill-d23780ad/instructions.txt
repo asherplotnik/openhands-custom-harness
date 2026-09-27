@@ -1,0 +1,15 @@
+Create a skill named bank-agent-guide that helps the agent accurately answer questions about the Bank Agent harness itself.
+The skill should cover user-visible and operational aspects of Bank Agent, including:
+- Session creation, resuming, searching, archiving, locking, and persistence.
+- Workspace selection, project workspaces, Scratch, and skill-draft workspaces.
+- General and workspace instructions and their precedence.
+- Skills discovery, creation, validation, installation, and loading.
+- CLI commands, keyboard navigation, settings, and help.
+- Providers, models, configuration, startup scripts, and IDE-terminal usage.
+- Approval rules, read-only actions, command allowlists, file-write boundaries, and other safety restrictions.
+- Logs, context handling, lifecycle information, known limitations, and troubleshooting.
+The skill must use the current Bank Agent source code, README.md, HELP.txt, configuration files, and scripts as the source of truth. It should teach the agent how to inspect the current implementation when an answer could have changed, instead of copying every implementation detail into static instructions that will become outdated.
+This skill is only about the Bank Agent harness—not the applications or repositories developers work on inside project workspaces.
+Do not attempt to document all OpenHands SDK capabilities. Include OpenHands details only when they directly explain behavior exposed by Bank Agent, and clearly distinguish Bank Agent behavior from underlying SDK behavior.
+The skill should support explanation and troubleshooting. It must not modify harness configuration, sessions, projects, or source code unless the user explicitly asks for a change.
+Keep SKILL.md concise. Add focused reference files only if they materially improve navigation or accuracy.
